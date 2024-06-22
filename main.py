@@ -10,6 +10,12 @@ from src.Predict import NN_Runner, XGBoost_Runner
 from src.Utils.Dictionaries import team_index_current
 from src.Utils.tools import create_todays_games_from_odds, get_json_data, to_data_frame, get_todays_games_json, create_todays_games
 
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
+from bs4 import BeautifulSoup
+
+
 todays_games_url = 'https://data.nba.com/data/10s/v2015/json/mobile_teams/nba/2023/scores/00_todays_scores.json'
 data_url = 'https://stats.nba.com/stats/leaguedashteamstats?' \
            'Conference=&DateFrom=&DateTo=&Division=&GameScope=&' \
@@ -19,6 +25,39 @@ data_url = 'https://stats.nba.com/stats/leaguedashteamstats?' \
            'PlayerExperience=&PlayerPosition=&PlusMinus=N&Rank=N&' \
            'Season=2023-24&SeasonSegment=&SeasonType=Regular+Season&ShotClockRange=&' \
            'StarterBench=&TeamID=0&TwoWay=0&VsConference=&VsDivision='
+
+
+def checkIfGamesToday():
+    today = datetime.now()
+    formatted_date = today.strftime("%Y%m%d")
+    espn_url = f"https://www.espn.com/nba/scoreboard/_/date/{formatted_date}"
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-infobars")
+    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+    try:
+        driver.get(espn_url)
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        game_section = soup.find('div', class_='PageLayout__Main')
+        if game_section:
+            no_games_message = game_section.find('h4', class_='n5 tc pv6 clr-gray-05')
+            if no_games_message and "No games on this date." in no_games_message.text:
+                print("There are no NBA games scheduled today. Check back tomorrow or review the NBA’s schedule at"
+                      "espn.com/nba/scoreboard to see when the next tip off is set to take place.")
+                return False
+            else:
+                print("NBA games are scheduled today.")
+                return True
+        else:
+            print("It could not be determined if NBA games are scheduled today.")
+            return False
+    finally:
+        driver.quit()
 
 
 def createTodaysGames(games, df, odds):
@@ -86,46 +125,47 @@ def createTodaysGames(games, df, odds):
 
 
 def main():
-    odds = None
-    if args.odds:
-        odds = SbrOddsProvider(sportsbook=args.odds).get_odds()
-        games = create_todays_games_from_odds(odds)
-        if len(games) == 0:
-            print("No games found.")
-            return
-        if (games[0][0] + ':' + games[0][1]) not in list(odds.keys()):
-            print(games[0][0] + ':' + games[0][1])
-            print(Fore.RED,"--------------Games list not up to date for todays games!!! Scraping disabled until list is updated.--------------")
-            print(Style.RESET_ALL)
-            odds = None
+    if checkIfGamesToday():
+        odds = None
+        if args.odds:
+            odds = SbrOddsProvider(sportsbook=args.odds).get_odds()
+            games = create_todays_games_from_odds(odds)
+            if len(games) == 0:
+                print("No games found.")
+                return
+            if (games[0][0] + ':' + games[0][1]) not in list(odds.keys()):
+                print(games[0][0] + ':' + games[0][1])
+                print(Fore.RED,"--------------Games list not up to date for todays games!!! Scraping disabled until list is updated.--------------")
+                print(Style.RESET_ALL)
+                odds = None
+            else:
+                print(f"------------------{args.odds} odds data------------------")
+                for g in odds.keys():
+                    home_team, away_team = g.split(":")
+                    print(f"{away_team} ({odds[g][away_team]['money_line_odds']}) @ {home_team} ({odds[g][home_team]['money_line_odds']})")
         else:
-            print(f"------------------{args.odds} odds data------------------")
-            for g in odds.keys():
-                home_team, away_team = g.split(":")
-                print(f"{away_team} ({odds[g][away_team]['money_line_odds']}) @ {home_team} ({odds[g][home_team]['money_line_odds']})")
-    else:
-        data = get_todays_games_json(todays_games_url)
-        games = create_todays_games(data)
-    data = get_json_data(data_url)
-    df = to_data_frame(data)
-    data, todays_games_uo, frame_ml, home_team_odds, away_team_odds = createTodaysGames(games, df, odds)
-    if args.nn:
-        print("------------Neural Network Model Predictions-----------")
-        data = tf.keras.utils.normalize(data, axis=1)
-        NN_Runner.nn_runner(data, todays_games_uo, frame_ml, games, home_team_odds, away_team_odds, args.kc)
-        print("-------------------------------------------------------")
-    if args.xgb:
-        print("---------------XGBoost Model Predictions---------------")
-        XGBoost_Runner.xgb_runner(data, todays_games_uo, frame_ml, games, home_team_odds, away_team_odds, args.kc)
-        print("-------------------------------------------------------")
-    if args.A:
-        print("---------------XGBoost Model Predictions---------------")
-        XGBoost_Runner.xgb_runner(data, todays_games_uo, frame_ml, games, home_team_odds, away_team_odds, args.kc)
-        print("-------------------------------------------------------")
-        data = tf.keras.utils.normalize(data, axis=1)
-        print("------------Neural Network Model Predictions-----------")
-        NN_Runner.nn_runner(data, todays_games_uo, frame_ml, games, home_team_odds, away_team_odds, args.kc)
-        print("-------------------------------------------------------")
+            data = get_todays_games_json(todays_games_url)
+            games = create_todays_games(data)
+        data = get_json_data(data_url)
+        df = to_data_frame(data)
+        data, todays_games_uo, frame_ml, home_team_odds, away_team_odds = createTodaysGames(games, df, odds)
+        if args.nn:
+            print("------------Neural Network Model Predictions-----------")
+            data = tf.keras.utils.normalize(data, axis=1)
+            NN_Runner.nn_runner(data, todays_games_uo, frame_ml, games, home_team_odds, away_team_odds, args.kc)
+            print("-------------------------------------------------------")
+        if args.xgb:
+            print("---------------XGBoost Model Predictions---------------")
+            XGBoost_Runner.xgb_runner(data, todays_games_uo, frame_ml, games, home_team_odds, away_team_odds, args.kc)
+            print("-------------------------------------------------------")
+        if args.A:
+            print("---------------XGBoost Model Predictions---------------")
+            XGBoost_Runner.xgb_runner(data, todays_games_uo, frame_ml, games, home_team_odds, away_team_odds, args.kc)
+            print("-------------------------------------------------------")
+            data = tf.keras.utils.normalize(data, axis=1)
+            print("------------Neural Network Model Predictions-----------")
+            NN_Runner.nn_runner(data, todays_games_uo, frame_ml, games, home_team_odds, away_team_odds, args.kc)
+            print("-------------------------------------------------------")
 
 
 if __name__ == "__main__":
