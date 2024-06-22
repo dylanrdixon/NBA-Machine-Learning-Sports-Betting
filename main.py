@@ -47,7 +47,7 @@ def checkIfGamesToday():
         if game_section:
             no_games_message = game_section.find('h4', class_='n5 tc pv6 clr-gray-05')
             if no_games_message and "No games on this date." in no_games_message.text:
-                print("There are no NBA games scheduled today. Check back tomorrow or review the NBA’s schedule at"
+                print("There are no NBA games scheduled today. Check back tomorrow or review the NBA’s schedule at "
                       "espn.com/nba/scoreboard to see when the next tip off is set to take place.")
                 return False
             else:
